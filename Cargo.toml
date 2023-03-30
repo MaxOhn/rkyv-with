@@ -1,9 +1,12 @@
 [package]
 name = "rkyv-with"
+description = "Third-party derive macro for rkyv's *With traits"
 version = "0.1.0"
 authors = ["MaxOhn <ohn.m@hotmail.de>"]
 edition = "2021"
 license = "MIT"
+repository = "https://github.com/MaxOhn/rkyv-with"
+keywords = ["rkyv", "with", "remote"]
 
 [lib]
 proc-macro = true
