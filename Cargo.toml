@@ -1,0 +1,17 @@
+[package]
+name = "rkyv-with"
+version = "0.1.0"
+authors = ["MaxOhn <ohn.m@hotmail.de>"]
+edition = "2021"
+license = "MIT"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full"] }
+
+[dev-dependencies]
+rkyv = "0.7"
