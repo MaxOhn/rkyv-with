@@ -1,21 +1,147 @@
-use std::{fmt::Debug, num::NonZeroU64};
+use std::{fmt::Debug, num::NonZeroU64, path::PathBuf};
 
 use rkyv::{
-    ser::serializers::AllocSerializer,
-    with::{ArchiveWith, CopyOptimize, DeserializeWith, Niche, SerializeWith, With},
+    ser::Serializer,
+    with::{ArchiveWith, AsString, CopyOptimize, DeserializeWith, Map, Niche, SerializeWith, With},
     Archive, Archived, Infallible,
 };
 use rkyv_with::{ArchiveWith, DeserializeWith};
+use serializer::CustomSerializer;
+
+use crate::with_noop::WithNoop;
+
+mod serializer {
+    use std::{alloc::Layout, ptr::NonNull};
+
+    use rkyv::{
+        ser::{serializers::AllocSerializer, ScratchSpace, Serializer},
+        with::AsStringError,
+        AlignedVec, Fallible,
+    };
+
+    /// Custom serializer so we can use the `AsString` wrapper
+    #[derive(Default)]
+    pub struct CustomSerializer<const N: usize> {
+        inner: AllocSerializer<N>,
+    }
+
+    impl<const N: usize> CustomSerializer<N> {
+        pub fn into_bytes(self) -> AlignedVec {
+            self.inner.into_serializer().into_inner()
+        }
+    }
+
+    impl<const N: usize> Fallible for CustomSerializer<N> {
+        type Error = CustomSerializerError<<AllocSerializer<N> as Fallible>::Error>;
+    }
+
+    impl<const N: usize> Serializer for CustomSerializer<N> {
+        #[inline]
+        fn pos(&self) -> usize {
+            self.inner.pos()
+        }
+
+        #[inline]
+        fn write(&mut self, bytes: &[u8]) -> Result<(), Self::Error> {
+            self.inner
+                .write(bytes)
+                .map_err(CustomSerializerError::Inner)
+        }
+    }
+
+    impl<const N: usize> ScratchSpace for CustomSerializer<N> {
+        unsafe fn push_scratch(&mut self, layout: Layout) -> Result<NonNull<[u8]>, Self::Error> {
+            self.inner
+                .push_scratch(layout)
+                .map_err(CustomSerializerError::Inner)
+        }
+
+        unsafe fn pop_scratch(
+            &mut self,
+            ptr: NonNull<u8>,
+            layout: Layout,
+        ) -> Result<(), Self::Error> {
+            self.inner
+                .pop_scratch(ptr, layout)
+                .map_err(CustomSerializerError::Inner)
+        }
+    }
+
+    #[derive(Debug)]
+    pub enum CustomSerializerError<E> {
+        Inner(E),
+        AsStringError(AsStringError),
+    }
+
+    impl<E> From<AsStringError> for CustomSerializerError<E> {
+        fn from(err: AsStringError) -> Self {
+            Self::AsStringError(err)
+        }
+    }
+}
+
+mod with_noop {
+    use rkyv::{
+        with::{ArchiveWith, DeserializeWith, SerializeWith},
+        Archive, Archived, Deserialize, Fallible, Serialize,
+    };
+
+    /// Usable as rkyv With-wrapper which doesn't to anything
+    /// and just uses the type's Archive/Deserialize/Serialize impls.
+    pub struct WithNoop;
+
+    impl<F: Archive> ArchiveWith<F> for WithNoop {
+        type Archived = <F as Archive>::Archived;
+        type Resolver = <F as Archive>::Resolver;
+
+        unsafe fn resolve_with(
+            field: &F,
+            pos: usize,
+            resolver: Self::Resolver,
+            out: *mut Self::Archived,
+        ) {
+            field.resolve(pos, resolver, out)
+        }
+    }
+
+    impl<F: Serialize<S>, S: Fallible> SerializeWith<F, S> for WithNoop {
+        fn serialize_with(
+            field: &F,
+            serializer: &mut S,
+        ) -> Result<Self::Resolver, <S as Fallible>::Error> {
+            field.serialize(serializer)
+        }
+    }
+
+    impl<F, D> DeserializeWith<Archived<F>, F, D> for WithNoop
+    where
+        F: Archive,
+        Archived<F>: Deserialize<F, D>,
+        D: Fallible,
+    {
+        fn deserialize_with(
+            field: &Archived<F>,
+            deserializer: &mut D,
+        ) -> Result<F, <D as Fallible>::Error> {
+            field.deserialize(deserializer)
+        }
+    }
+}
 
 fn roundtrip<Wrapper, Remote>(remote: &Remote)
 where
     Wrapper: ArchiveWith<Remote>
-        + SerializeWith<Remote, AllocSerializer<8>>
+        + SerializeWith<Remote, CustomSerializer<8>>
         + DeserializeWith<Archived<With<Remote, Wrapper>>, Remote, Infallible>,
     Remote: Debug + PartialEq,
 {
+    let mut serializer = CustomSerializer::<8>::default();
+
     let with = With::<Remote, Wrapper>::cast(remote);
-    let bytes = rkyv::to_bytes::<_, 8>(with).unwrap();
+
+    serializer.serialize_value(with).unwrap();
+    let bytes = serializer.into_bytes();
+
     let archived = unsafe { rkyv::archived_root::<With<Remote, Wrapper>>(&bytes) };
     let deserialized: Remote = Wrapper::deserialize_with(archived, &mut Infallible).unwrap();
 
@@ -29,6 +155,7 @@ fn named_struct() {
         a: u8,
         b: Vec<A>,
         c: Option<NonZeroU64>,
+        d: Vec<PathBuf>,
     }
 
     #[derive(Archive, ArchiveWith, DeserializeWith)]
@@ -40,12 +167,15 @@ fn named_struct() {
         #[with(Niche)]
         #[archive_with(from(Option<NonZeroU64>), via(Niche))]
         c: Option<NonZeroU64>,
+        #[archive_with(from(Vec<PathBuf>), via(WithNoop, Map<AsString>))]
+        d: Vec<String>,
     }
 
     let remote = Remote {
         a: 0,
         b: Vec::new(),
         c: None,
+        d: Vec::new(),
     };
 
     roundtrip::<Example<i32>, _>(&remote);
@@ -54,7 +184,7 @@ fn named_struct() {
 #[test]
 fn unnamed_struct() {
     #[derive(Debug, PartialEq)]
-    struct Remote<A>(u8, Vec<A>, Option<NonZeroU64>);
+    struct Remote<A>(u8, Vec<A>, Option<NonZeroU64>, Vec<PathBuf>);
 
     #[derive(Archive, ArchiveWith, DeserializeWith)]
     #[archive_with(from(Remote::<A>))]
@@ -64,9 +194,10 @@ fn unnamed_struct() {
         #[with(Niche)]
         #[archive_with(from(Option<NonZeroU64>), via(Niche))]
         Option<NonZeroU64>,
+        #[archive_with(from(Vec<PathBuf>), via(WithNoop, Map<AsString>))] Vec<String>,
     );
 
-    let remote = Remote(0, Vec::new(), None);
+    let remote = Remote(0, Vec::new(), None, Vec::new());
     roundtrip::<Example<i32>, _>(&remote);
 }
 
@@ -89,7 +220,11 @@ fn full_enum() {
     enum Remote<A> {
         A,
         B(u8),
-        C { a: Vec<A>, b: Option<NonZeroU64> },
+        C {
+            a: Vec<A>,
+            b: Option<NonZeroU64>,
+            c: Vec<PathBuf>,
+        },
     }
 
     #[allow(unused)]
@@ -104,6 +239,8 @@ fn full_enum() {
             #[with(Niche)]
             #[archive_with(from(Option<NonZeroU64>), via(Niche))]
             b: Option<NonZeroU64>,
+            #[archive_with(from(Vec<PathBuf>), via(WithNoop, Map<AsString>))]
+            c: Vec<String>,
         },
     }
 
@@ -113,6 +250,7 @@ fn full_enum() {
         Remote::C {
             a: Vec::new(),
             b: None,
+            c: Vec::new(),
         },
     ] {
         roundtrip::<Example<i32>, _>(&remote);
