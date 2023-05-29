@@ -3,7 +3,7 @@ use std::{fmt::Debug, num::NonZeroU64, path::PathBuf};
 use rkyv::{
     ser::Serializer,
     with::{ArchiveWith, AsString, CopyOptimize, DeserializeWith, Map, Niche, SerializeWith, With},
-    Archive, Archived, Infallible,
+    AlignedVec, Archive, Archived, Infallible,
 };
 use rkyv_with::{ArchiveWith, DeserializeWith};
 use serializer::CustomSerializer;
@@ -128,6 +128,24 @@ mod with_noop {
     }
 }
 
+fn serialize<Wrapper, Remote>(remote: &Remote) -> AlignedVec
+where
+    Wrapper: SerializeWith<Remote, CustomSerializer<8>>,
+{
+    let mut serializer = CustomSerializer::<8>::default();
+    let with = With::<Remote, Wrapper>::cast(remote);
+    serializer.serialize_value(with).unwrap();
+
+    serializer.into_bytes()
+}
+
+fn archive<Wrapper, Remote>(bytes: &[u8]) -> &<Wrapper as ArchiveWith<Remote>>::Archived
+where
+    Wrapper: ArchiveWith<Remote>,
+{
+    unsafe { rkyv::archived_root::<With<Remote, Wrapper>>(bytes) }
+}
+
 fn roundtrip<Wrapper, Remote>(remote: &Remote)
 where
     Wrapper: ArchiveWith<Remote>
@@ -135,14 +153,8 @@ where
         + DeserializeWith<Archived<With<Remote, Wrapper>>, Remote, Infallible>,
     Remote: Debug + PartialEq,
 {
-    let mut serializer = CustomSerializer::<8>::default();
-
-    let with = With::<Remote, Wrapper>::cast(remote);
-
-    serializer.serialize_value(with).unwrap();
-    let bytes = serializer.into_bytes();
-
-    let archived = unsafe { rkyv::archived_root::<With<Remote, Wrapper>>(&bytes) };
+    let bytes = serialize::<Wrapper, Remote>(remote);
+    let archived = archive::<Wrapper, Remote>(&bytes);
     let deserialized: Remote = Wrapper::deserialize_with(archived, &mut Infallible).unwrap();
 
     assert_eq!(remote, &deserialized);
@@ -255,4 +267,74 @@ fn full_enum() {
     ] {
         roundtrip::<Example<i32>, _>(&remote);
     }
+}
+
+#[test]
+fn named_struct_private() {
+    mod remote {
+        #[derive(Copy, Clone, Default)]
+        pub struct Remote {
+            inner: [u8; 4],
+        }
+
+        impl Remote {
+            pub fn into_inner(self) -> [u8; 4] {
+                self.inner
+            }
+
+            pub fn as_inner(&self) -> [u8; 4] {
+                self.inner
+            }
+        }
+    }
+
+    #[derive(Archive, ArchiveWith)]
+    #[archive_with(from(remote::Remote))]
+    struct ExampleByRef {
+        #[archive_with(getter = "remote::Remote::as_inner")]
+        inner: [u8; 4],
+    }
+
+    #[derive(Archive, ArchiveWith)]
+    #[archive_with(from(remote::Remote))]
+    struct ExampleByVal {
+        #[archive_with(getter = "remote::Remote::into_inner", getter_owned)]
+        inner: [u8; 4],
+    }
+
+    let remote = remote::Remote::default();
+    let _ = archive::<ExampleByRef, _>(&serialize::<ExampleByRef, _>(&remote));
+    let _ = archive::<ExampleByVal, _>(&serialize::<ExampleByVal, _>(&remote));
+}
+
+#[test]
+fn unnamed_struct_private() {
+    mod remote {
+        #[derive(Copy, Clone, Default)]
+        pub struct Remote([u8; 4]);
+
+        impl Remote {
+            pub fn into_inner(self) -> [u8; 4] {
+                self.0
+            }
+
+            pub fn as_inner(&self) -> [u8; 4] {
+                self.0
+            }
+        }
+    }
+
+    #[derive(Archive, ArchiveWith)]
+    #[archive_with(from(remote::Remote))]
+    struct ExampleByRef(#[archive_with(getter = "remote::Remote::as_inner")] [u8; 4]);
+
+    #[derive(Archive, ArchiveWith)]
+    #[archive_with(from(remote::Remote))]
+    struct ExampleByVal(
+        #[archive_with(getter = "remote::Remote::into_inner", getter_owned)] [u8; 4],
+    );
+
+    let remote = remote::Remote::default();
+    let _ = archive::<ExampleByRef, _>(&serialize::<ExampleByRef, _>(&remote));
+    let _ = archive::<ExampleByVal, _>(&serialize::<ExampleByVal, _>(&remote));
 }
