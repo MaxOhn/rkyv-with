@@ -67,7 +67,9 @@ pub fn derive(mut input: DeriveInput) -> Result<TokenStream> {
                                     Some(Getter {
                                         path,
                                         owned_self: true,
-                                    }) => parse_quote! { &#path (field.to_owned()) },
+                                    }) => {
+                                        parse_quote! { &#path (<#from_ty as Clone>::clone(field)) }
+                                    }
                                     Some(Getter {
                                         path,
                                         owned_self: false,
@@ -115,7 +117,9 @@ pub fn derive(mut input: DeriveInput) -> Result<TokenStream> {
                                     Some(Getter {
                                         path,
                                         owned_self: true,
-                                    }) => parse_quote! { &#path (field.to_owned()) },
+                                    }) => {
+                                        parse_quote! { &#path (<#from_ty as Clone>::clone(field)) }
+                                    }
                                     Some(Getter {
                                         path,
                                         owned_self: false,
@@ -171,7 +175,9 @@ pub fn derive(mut input: DeriveInput) -> Result<TokenStream> {
                             let attrs = ParsedAttributes::new(&field.attrs).unwrap();
 
                             let expr = match attrs.getter {
-                                Some(Getter { path, owned_self: true }) => parse_quote! { &#path (field.to_owned()) },
+                                Some(Getter { path, owned_self: true }) => {
+                                    parse_quote! { &#path (<#from_ty as Clone>::clone(field)) }
+                                },
                                 Some(Getter { path, owned_self: false }) => parse_quote! { &#path (field) },
                                 None => parse_quote! { (&field.#index) },
                             };
@@ -217,7 +223,9 @@ pub fn derive(mut input: DeriveInput) -> Result<TokenStream> {
                                         Some(Getter {
                                             path,
                                             owned_self: true,
-                                        }) => parse_quote! { &#path (field.to_owned()) },
+                                        }) => {
+                                            parse_quote! { &#path (<#from_ty as Clone>::clone(field)) }
+                                        }
                                         Some(Getter {
                                             path,
                                             owned_self: false,
