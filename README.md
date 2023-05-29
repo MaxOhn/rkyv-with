@@ -115,3 +115,74 @@ let deserialized_unarchivable: Unarchivable =
 let deserialized_wrapper: ArchivesTheUnarchivable =
     archived.deserialize(&mut Infallible).unwrap();
 ```
+
+## Private fields
+
+If the current crate is unable to access fields of a remote type directly due to them being private, deriving the traits requires another way of accessing those fields, namely by manually specifying getter functions.
+
+```rust
+use rkyv::with::ArchiveWith;
+use rkyv::Archive;
+use rkyv_with::ArchiveWith;
+
+// Imagine again that this is a remote module that you have no way of modifying
+mod remote {
+    #[derive(Clone)]
+    pub struct Remote {
+        pub public_field: u32,
+        private_field: u32,
+    }
+
+    impl Remote {
+        // By default it will be assumed that the function will take a reference
+        pub fn get_private_field(&self) -> u32 {
+            self.private_field
+        }
+
+        // If it takes ownership instead, the type will need to be cloned internally
+        pub fn into_private_field(self) -> u32 {
+            self.private_field
+        }
+
+        // Some publicly available way of creating the type in case you need to deserialize
+        pub fn new(public_field: u32, private_field: u32) -> Self {
+            Self { public_field, private_field }
+        }
+    }
+}
+
+#[derive(Archive, ArchiveWith)]
+#[archive_with(from(remote::Remote))]
+struct NativeByReference {
+    public_field: u32,
+    // Specifying the path to the getter function which only takes a reference
+    #[archive_with(getter = "remote::Remote::get_private_field")]
+    private_field: u32,
+}
+
+#[derive(Archive, ArchiveWith)]
+#[archive_with(from(remote::Remote))]
+struct NativeByValue {
+    public_field: u32,
+    // If the function takes ownership, be sure to also specify `getter_owned`
+    #[archive_with(getter = "remote::Remote::into_private_field", getter_owned)]
+    private_field: u32,
+}
+
+// Since creating instances of a type that has private fields cannot be done in a general way,
+// `DeserializeWith` cannot be derived for such types and instead has to be implemented manually.
+// An implementation for the example above could look as follows
+
+use rkyv::with::DeserializeWith;
+use rkyv::{Archived, Fallible};
+
+impl<D: Fallible> DeserializeWith<Archived<NativeByValue>, remote::Remote, D> for NativeByValue {
+    fn deserialize_with(
+        archived: &Archived<NativeByValue>,
+        _deserializer: &mut D,
+    ) -> Result<remote::Remote, <D as Fallible>::Error> {
+        // Use whichever method is available to create an instance
+        Ok(remote::Remote::new(archived.public_field, archived.private_field))
+    }
+}
+```
