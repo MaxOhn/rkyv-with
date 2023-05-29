@@ -96,20 +96,22 @@ pub fn with<B, F: FnMut(B, &Type) -> B>(field: &Field, init: B, f: F) -> Result<
     Ok(fields.iter().flatten().rev().fold(init, f))
 }
 
-pub fn with_ty(field: &Field) -> Result<Type> {
+pub fn with_ty(field: &Field) -> Result<(Type, ParsedAttributes)> {
     let ty = &field.ty;
-    let parsed_attr = ParsedAttributes::new(&field.attrs)?;
+    let parsed_attrs = ParsedAttributes::new(&field.attrs)?;
 
-    match (parsed_attr.from, parsed_attr.via) {
-        (Some(from_ty), None) => Ok(parse_quote! { ::rkyv::with::With<#from_ty, #ty> }),
-        (Some(from_ty), Some(via_ty)) => Ok(parse_quote! { ::rkyv::with::With<#from_ty, #via_ty> }),
-        (None, Some(via_ty)) => Ok(parse_quote! { ::rkyv::with::With<#ty, #via_ty> }),
+    let ty = match (&parsed_attrs.from, &parsed_attrs.via) {
+        (Some(from_ty), None) => parse_quote! { ::rkyv::with::With<#from_ty, #ty> },
+        (Some(from_ty), Some(via_ty)) => parse_quote! { ::rkyv::with::With<#from_ty, #via_ty> },
+        (None, Some(via_ty)) => parse_quote! { ::rkyv::with::With<#ty, #via_ty> },
         (None, None) => with(
             field,
             ty.clone(),
             |ty, wrapper| parse_quote! { ::rkyv::with::With<#ty, #wrapper> },
-        ),
-    }
+        )?,
+    };
+
+    Ok((ty, parsed_attrs))
 }
 
 pub fn with_cast(field: &Field, expr: Expr) -> Result<Expr> {
@@ -127,8 +129,12 @@ pub fn with_cast(field: &Field, expr: Expr) -> Result<Expr> {
     }
 }
 
-pub fn with_inner(field: &Field, expr: Expr) -> Result<Expr> {
-    with(field, expr, |expr, _| parse_quote! { #expr.into_inner() })
+pub fn with_inner(field: &Field, attrs: &ParsedAttributes, expr: Expr) -> Result<Expr> {
+    if attrs.from.is_none() && attrs.via.is_none() {
+        with(field, expr, |expr, _| parse_quote! { #expr.into_inner() })
+    } else {
+        Ok(parse_quote! { #expr.into_inner() })
+    }
 }
 
 pub fn strip_raw(ident: &Ident) -> String {

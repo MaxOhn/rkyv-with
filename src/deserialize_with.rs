@@ -44,7 +44,7 @@ pub fn derive(mut input: DeriveInput) -> Result<TokenStream> {
                 let mut deserialize_where = where_clause.clone();
 
                 for field in fields.named.iter() {
-                    let ty = with_ty(field)?;
+                    let (ty, _) = with_ty(field)?;
 
                     deserialize_where
                         .predicates
@@ -60,10 +60,11 @@ pub fn derive(mut input: DeriveInput) -> Result<TokenStream> {
                     .iter()
                     .map(|field| {
                         let name = &field.ident;
-                        let ty = with_ty(field).unwrap();
+                        let (ty, attrs) = with_ty(field).unwrap();
 
                         let value = with_inner(
                             field,
+                            &attrs,
                             parse_quote! {
                                 Deserialize::<#ty, __D>::deserialize(
                                     &field.#name,
@@ -102,7 +103,7 @@ pub fn derive(mut input: DeriveInput) -> Result<TokenStream> {
                 let mut deserialize_where = where_clause.clone();
 
                 for field in fields.unnamed.iter() {
-                    let ty = with_ty(field)?;
+                    let (ty, _) = with_ty(field)?;
 
                     deserialize_where
                         .predicates
@@ -119,10 +120,11 @@ pub fn derive(mut input: DeriveInput) -> Result<TokenStream> {
                         let deserialize_fields =
                             fields.unnamed.iter().enumerate().map(|(i, field)| {
                                 let index = Index::from(i);
-                                let ty = with_ty(field).unwrap();
+                                let (ty, attrs) = with_ty(field).unwrap();
 
                                 let value = with_inner(
                                     field,
+                                    &attrs,
                                     parse_quote! {
                                         Deserialize::<#ty, __D>::deserialize(
                                             &field.#index,
@@ -179,7 +181,7 @@ pub fn derive(mut input: DeriveInput) -> Result<TokenStream> {
                 match variant.fields {
                     Fields::Named(ref fields) => {
                         for field in fields.named.iter() {
-                            let ty = with_ty(field)?;
+                            let (ty, _) = with_ty(field)?;
 
                             deserialize_where
                                 .predicates
@@ -192,7 +194,7 @@ pub fn derive(mut input: DeriveInput) -> Result<TokenStream> {
                     }
                     Fields::Unnamed(ref fields) => {
                         for field in fields.unnamed.iter() {
-                            let ty = with_ty(field)?;
+                            let (ty, _) = with_ty(field)?;
 
                             deserialize_where
                                 .predicates
@@ -223,9 +225,10 @@ pub fn derive(mut input: DeriveInput) -> Result<TokenStream> {
 
                                 let fields = fields.named.iter().map(|field| {
                                     let name = &field.ident;
-                                    let ty = with_ty(field).unwrap();
+                                    let (ty, attrs) = with_ty(field).unwrap();
                                     let value = with_inner(
                                         field,
+                                        &attrs,
                                         parse_quote! {
                                             Deserialize::<#ty, __D>::deserialize(
                                                 #name,
@@ -253,10 +256,11 @@ pub fn derive(mut input: DeriveInput) -> Result<TokenStream> {
 
                                 let fields = fields.unnamed.iter().enumerate().map(|(i, field)| {
                                     let binding = Ident::new(&format!("_{}", i), field.span());
-                                    let ty = with_ty(field).unwrap();
+                                    let (ty, attrs) = with_ty(field).unwrap();
 
                                     let value = with_inner(
                                         field,
+                                        &attrs,
                                         parse_quote! {
                                             Deserialize::<#ty, __D>::deserialize(
                                                 #binding,
