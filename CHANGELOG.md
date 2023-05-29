@@ -1,9 +1,9 @@
-## Upcoming
+# v0.1.1 (2023-05-29)
 
 - Fixed `DeserializeWith` impl when certain wrappers were used ([#2])
 - A specified getter method for unnamed struct fields is now considered properly ([#4])
 
-# v0.1.0 (2023-03-30)
+## v0.1.0 (2023-03-30)
 
 First release
 
