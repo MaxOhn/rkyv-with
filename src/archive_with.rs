@@ -46,7 +46,7 @@ pub fn derive(mut input: DeriveInput) -> Result<TokenStream> {
                 let mut serialize_where = where_clause.clone();
 
                 for field in fields.named.iter() {
-                    let ty = with_ty(field)?;
+                    let (ty, _) = with_ty(field)?;
 
                     archive_where.predicates.push(parse_quote! { #ty: Archive });
 
@@ -149,7 +149,7 @@ pub fn derive(mut input: DeriveInput) -> Result<TokenStream> {
                 let mut serialize_where = where_clause.clone();
 
                 for field in fields.unnamed.iter() {
-                    let ty = with_ty(field)?;
+                    let (ty, _) = with_ty(field)?;
 
                     archive_where
                         .predicates
@@ -285,7 +285,7 @@ pub fn derive(mut input: DeriveInput) -> Result<TokenStream> {
                 match variant.fields {
                     Fields::Named(ref fields) => {
                         for field in fields.named.iter() {
-                            let ty = with_ty(field)?;
+                            let (ty, _) = with_ty(field)?;
 
                             archive_where
                                 .predicates
@@ -298,7 +298,7 @@ pub fn derive(mut input: DeriveInput) -> Result<TokenStream> {
                     }
                     Fields::Unnamed(ref fields) => {
                         for field in fields.unnamed.iter() {
-                            let ty = with_ty(field)?;
+                            let (ty, _) = with_ty(field)?;
 
                             archive_where
                                 .predicates
@@ -331,7 +331,7 @@ pub fn derive(mut input: DeriveInput) -> Result<TokenStream> {
                             Fields::Named(ref fields) => {
                                 let fields = fields.named.iter().map(|field| {
                                     let name = &field.ident;
-                                    let ty = with_ty(field).unwrap();
+                                    let (ty, _) = with_ty(field).unwrap();
 
                                     quote! { #name: Archived<#ty> }
                                 });
@@ -347,7 +347,7 @@ pub fn derive(mut input: DeriveInput) -> Result<TokenStream> {
                             }
                             Fields::Unnamed(ref fields) => {
                                 let fields = fields.unnamed.iter().map(|field| {
-                                    let ty = with_ty(field).unwrap();
+                                    let (ty, _) = with_ty(field).unwrap();
 
                                     quote! { Archived<#ty> }
                                 });
