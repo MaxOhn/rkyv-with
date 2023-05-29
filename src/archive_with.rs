@@ -64,16 +64,13 @@ pub fn derive(mut input: DeriveInput) -> Result<TokenStream> {
                                 let attrs = ParsedAttributes::new(&field.attrs).unwrap();
 
                                 let expr = match attrs.getter {
-                                    Some(Getter {
-                                        path,
-                                        owned_self: true,
-                                    }) => {
-                                        parse_quote! { &#path (<#from_ty as Clone>::clone(field)) }
+                                    Some(Getter { path, owned_self }) => {
+                                        if owned_self {
+                                            parse_quote! { &#path (<#from_ty as Clone>::clone(field)) }
+                                        } else {
+                                            parse_quote! { &#path (field) }
+                                        }
                                     }
-                                    Some(Getter {
-                                        path,
-                                        owned_self: false,
-                                    }) => parse_quote! { &#path (field) },
                                     None => parse_quote! { (&field.#name) },
                                 };
 
@@ -114,16 +111,13 @@ pub fn derive(mut input: DeriveInput) -> Result<TokenStream> {
                                 let attrs = ParsedAttributes::new(&field.attrs).unwrap();
 
                                 let expr = match attrs.getter {
-                                    Some(Getter {
-                                        path,
-                                        owned_self: true,
-                                    }) => {
-                                        parse_quote! { &#path (<#from_ty as Clone>::clone(field)) }
+                                    Some(Getter { path, owned_self }) => {
+                                        if owned_self {
+                                            parse_quote! { &#path (<#from_ty as Clone>::clone(field)) }
+                                        } else {
+                                            parse_quote! { &#path (field) }
+                                        }
                                     }
-                                    Some(Getter {
-                                        path,
-                                        owned_self: false,
-                                    }) => parse_quote! { &#path (field) },
                                     None => parse_quote! { (&field.#name) },
                                 };
 
@@ -175,10 +169,13 @@ pub fn derive(mut input: DeriveInput) -> Result<TokenStream> {
                             let attrs = ParsedAttributes::new(&field.attrs).unwrap();
 
                             let expr = match attrs.getter {
-                                Some(Getter { path, owned_self: true }) => {
-                                    parse_quote! { &#path (<#from_ty as Clone>::clone(field)) }
+                                Some(Getter { path, owned_self }) => {
+                                    if owned_self {
+                                        parse_quote! { &#path (<#from_ty as Clone>::clone(field)) }
+                                    } else {
+                                        parse_quote! { &#path (field) }
+                                    }
                                 },
-                                Some(Getter { path, owned_self: false }) => parse_quote! { &#path (field) },
                                 None => parse_quote! { (&field.#index) },
                             };
 
@@ -220,16 +217,13 @@ pub fn derive(mut input: DeriveInput) -> Result<TokenStream> {
                                     let attrs = ParsedAttributes::new(&field.attrs).unwrap();
 
                                     let expr = match attrs.getter {
-                                        Some(Getter {
-                                            path,
-                                            owned_self: true,
-                                        }) => {
-                                            parse_quote! { &#path (<#from_ty as Clone>::clone(field)) }
+                                        Some(Getter { path, owned_self }) => {
+                                            if owned_self {
+                                                parse_quote! { &#path (<#from_ty as Clone>::clone(field)) }
+                                            } else {
+                                                parse_quote! { &#path (field) }
+                                            }
                                         }
-                                        Some(Getter {
-                                            path,
-                                            owned_self: false,
-                                        }) => parse_quote! { &#path (field) },
                                         None => parse_quote! { (&field.#index) },
                                     };
 
