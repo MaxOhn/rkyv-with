@@ -2,8 +2,11 @@ use std::iter;
 
 use quote::quote;
 use syn::{
-    parenthesized, parse_quote, punctuated::Punctuated, token::Comma, Attribute, Error, Expr,
-    Field, Ident, LitStr, Path, Result, Type,
+    parenthesized,
+    parse::{Parse, ParseStream},
+    parse_quote,
+    token::Token as TokenTrait,
+    Attribute, Error, Expr, Field, Ident, LitStr, Path, Result, Token, Type,
 };
 
 use crate::ATTR;
@@ -20,8 +23,8 @@ pub fn parse_top_attrs(attrs: &[Attribute]) -> Result<Vec<Type>> {
             if meta.path.is_ident("from") {
                 let content;
                 parenthesized!(content in meta.input);
-                let types = Punctuated::<_, Comma>::parse_terminated(&content)?;
-                from.extend(types);
+                let mut types = Vec::parse_terminated::<Token![,]>(&content)?;
+                from.append(&mut types);
 
                 Ok(())
             } else {
@@ -36,7 +39,7 @@ pub fn parse_top_attrs(attrs: &[Attribute]) -> Result<Vec<Type>> {
 #[derive(Default)]
 pub struct ParsedAttributes {
     pub from: Option<Type>,
-    pub via: Option<Punctuated<Type, Comma>>,
+    pub via: Option<Vec<Type>>,
     pub getter: Option<Getter>,
 }
 
@@ -61,7 +64,7 @@ impl ParsedAttributes {
                     } else if meta.path.is_ident("via") {
                         let content;
                         parenthesized!(content in meta.input);
-                        parsed.via = Some(Punctuated::parse_separated_nonempty(&content)?);
+                        parsed.via = Some(Vec::parse_separated_nonempty::<Token![,]>(&content)?);
                     } else if meta.path.is_ident("getter") {
                         getter_path = Some(meta.value()?.parse::<LitStr>()?.parse()?);
                     } else if meta.path.is_ident("getter_owned") {
@@ -90,7 +93,7 @@ pub fn with<B, F: FnMut(B, &Type) -> B>(field: &Field, init: B, f: F) -> Result<
         .iter()
         .filter_map(|attr| {
             if attr.path().is_ident("with") {
-                Some(attr.parse_args_with(Punctuated::<Type, Comma>::parse_separated_nonempty))
+                Some(attr.parse_args_with(Vec::parse_separated_nonempty::<Token![,]>))
             } else {
                 None
             }
@@ -148,7 +151,7 @@ pub fn with_inner(field: &Field, attrs: &ParsedAttributes, expr: Expr) -> Result
     if attrs.from.is_none() && attrs.via.is_none() {
         with(field, expr, |expr, _| parse_quote! { #expr.into_inner() })
     } else {
-        let into_inner_count = attrs.via.as_ref().map_or(1, Punctuated::len);
+        let into_inner_count = attrs.via.as_ref().map_or(1, Vec::len);
         let into_inners = iter::repeat(quote!(.into_inner())).take(into_inner_count);
 
         Ok(parse_quote! { #expr #( #into_inners )* })
@@ -162,4 +165,102 @@ pub fn strip_raw(ident: &Ident) -> String {
         .strip_prefix("r#")
         .map(ToString::to_string)
         .unwrap_or(as_string)
+}
+
+/// Revamping utility from [`Punctuated`] for the purpose of storing items
+/// more efficiently.
+///
+/// [`Punctuated`]: syn::punctuated::Punctuated
+pub trait PunctuatedExt<T> {
+    /// Parses one or more occurrences of `T` separated by punctuation of type
+    /// `P`, not accepting trailing punctuation.
+    ///
+    /// Parsing continues as long as punctuation `P` is present at the head of
+    /// the stream. This method returns upon parsing a `T` and observing that it
+    /// is not followed by a `P`, even if there are remaining tokens in the
+    /// stream.
+    fn parse_separated_nonempty<P: Parse + TokenTrait>(input: ParseStream) -> Result<Vec<T>>
+    where
+        T: Parse,
+    {
+        Self::parse_separated_nonempty_with::<P>(input, T::parse)
+    }
+
+    /// Parses one or more occurrences of `T` using the given parse function,
+    /// separated by punctuation of type `P`, not accepting trailing
+    /// punctuation.
+    ///
+    /// Like [`parse_separated_nonempty`], may complete early without parsing
+    /// the entire content of this stream.
+    fn parse_separated_nonempty_with<P: Parse + TokenTrait>(
+        input: ParseStream,
+        parser: fn(ParseStream) -> Result<T>,
+    ) -> Result<Vec<T>>;
+
+    /// Parses zero or more occurrences of `T` separated by punctuation of type
+    /// `P`, with optional trailing punctuation.
+    ///
+    /// Parsing continues until the end of this parse stream. The entire content
+    /// of this parse stream must consist of `T` and `P`.
+    fn parse_terminated<P: Parse>(input: ParseStream) -> Result<Vec<T>>
+    where
+        T: Parse,
+    {
+        Self::parse_terminated_with::<P>(input, T::parse)
+    }
+
+    /// Parses zero or more occurrences of `T` using the given parse function,
+    /// separated by punctuation of type `P`, with optional trailing
+    /// punctuation.
+    ///
+    /// Like [`parse_terminated`], the entire content of this stream is expected
+    /// to be parsed.
+    fn parse_terminated_with<P: Parse>(
+        input: ParseStream,
+        parser: fn(ParseStream) -> Result<T>,
+    ) -> Result<Vec<T>>;
+}
+
+impl<T> PunctuatedExt<T> for Vec<T> {
+    fn parse_separated_nonempty_with<P: Parse + TokenTrait>(
+        input: ParseStream,
+        parser: fn(ParseStream) -> Result<T>,
+    ) -> Result<Self> {
+        let mut vec = Vec::new();
+
+        loop {
+            vec.push(parser(input)?);
+
+            if !P::peek(input.cursor()) {
+                break;
+            }
+
+            input.parse::<P>()?;
+        }
+
+        Ok(vec)
+    }
+
+    fn parse_terminated_with<P: Parse>(
+        input: ParseStream,
+        parser: fn(ParseStream) -> Result<T>,
+    ) -> Result<Self> {
+        let mut vec = Vec::new();
+
+        loop {
+            if input.is_empty() {
+                break;
+            }
+
+            vec.push(parser(input)?);
+
+            if input.is_empty() {
+                break;
+            }
+
+            input.parse::<P>()?;
+        }
+
+        Ok(vec)
+    }
 }
