@@ -1,4 +1,8 @@
-# v0.1.1 (2023-05-29)
+# v0.1.2 (2023-09-25)
+
+- The function specified with `archive_with(getter = "...")` may now return a reference of the field's type
+
+## v0.1.1 (2023-05-29)
 
 - Fixed `DeserializeWith` impl when certain wrappers were used ([#2])
 - A specified getter method for unnamed struct fields is now considered properly ([#4])
