@@ -1,11 +1,11 @@
 use proc_macro2::{Ident, Span, TokenStream};
-use quote::quote;
+use quote::{format_ident, quote};
 use syn::{
     parse_quote, punctuated::Punctuated, spanned::Spanned, Data, DeriveInput, Error, Fields,
     Generics, Index, Result,
 };
 
-use crate::util::{parse_top_attrs, strip_raw, with_cast, with_ty, Getter, ParsedAttributes};
+use crate::util::{parse_top_attrs, strip_raw, with_cast, with_ty, ParsedAttributes};
 
 pub fn derive(mut input: DeriveInput) -> Result<TokenStream> {
     let _ = input.generics.make_where_clause();
@@ -62,22 +62,17 @@ pub fn derive(mut input: DeriveInput) -> Result<TokenStream> {
                             let resolve_fields = fields.named.iter().map(|field| {
                                 let name = &field.ident;
                                 let attrs = ParsedAttributes::new(&field.attrs).unwrap();
+                                let ty = attrs.from.as_ref().unwrap_or(&field.ty);
 
-                                let expr = match attrs.getter {
-                                    Some(Getter { path, owned_self }) => {
-                                        if owned_self {
-                                            parse_quote! { &#path (<#from_ty as Clone>::clone(field)) }
-                                        } else {
-                                            parse_quote! { &#path (field) }
-                                        }
-                                    }
-                                    None => parse_quote! { (&field.#name) },
-                                };
-
-                                let field = with_cast(field, expr).unwrap();
+                                let expr = attrs.getter.as_ref().map_or_else(
+                                    || parse_quote! { (field.#name) },
+                                    |getter| getter.make_expr(from_ty),
+                                );
+                                let field = with_cast(field, parse_quote!(__field)).unwrap();
 
                                 quote! {
                                     let (fp, fo) = out_field!(out.#name);
+                                    let __field: &#ty = &#expr;
                                     ::rkyv::Archive::resolve(#field, pos + fp, resolver.#name, fo);
                                 }
                             });
@@ -106,21 +101,24 @@ pub fn derive(mut input: DeriveInput) -> Result<TokenStream> {
                     let serialize_impls = from_tys
                         .iter()
                         .map(|from_ty| {
+                            let field_vars = fields.named.iter().map(|field| {
+                                let name = &field.ident;
+                                let ident = format_ident!("__{}", name.as_ref().unwrap());
+                                let attrs = ParsedAttributes::new(&field.attrs).unwrap();
+                                let ty = attrs.from.as_ref().unwrap_or(&field.ty);
+
+                                let expr = attrs.getter.as_ref().map_or_else(
+                                    || parse_quote! { (field.#name) },
+                                    |getter| getter.make_expr(from_ty),
+                                );
+
+                                quote! { let #ident: &#ty = &#expr; }
+                            });
+
                             let resolver_values = fields.named.iter().map(|field| {
                                 let name = &field.ident;
-                                let attrs = ParsedAttributes::new(&field.attrs).unwrap();
-
-                                let expr = match attrs.getter {
-                                    Some(Getter { path, owned_self }) => {
-                                        if owned_self {
-                                            parse_quote! { &#path (<#from_ty as Clone>::clone(field)) }
-                                        } else {
-                                            parse_quote! { &#path (field) }
-                                        }
-                                    }
-                                    None => parse_quote! { (&field.#name) },
-                                };
-
+                                let ident = format_ident!("__{}", name.as_ref().unwrap());
+                                let expr = parse_quote!( #ident );
                                 let field = with_cast(field, expr).unwrap();
 
                                 quote! { #name: Serialize::<__S>::serialize(#field, serializer)? }
@@ -134,6 +132,7 @@ pub fn derive(mut input: DeriveInput) -> Result<TokenStream> {
                                         field: &#from_ty,
                                         serializer: &mut __S,
                                     ) -> Result<Self::Resolver, <__S as Fallible>::Error> {
+                                        #( #field_vars )*
                                         Ok(Self::Resolver {
                                             #( #resolver_values, )*
                                         })
@@ -162,71 +161,75 @@ pub fn derive(mut input: DeriveInput) -> Result<TokenStream> {
                     }
 
                     let archive_impls = from_tys
-                    .iter()
-                    .map(|from_ty| {
-                        let resolve_fields = fields.unnamed.iter().enumerate().map(|(i, field)| {
-                            let index = Index::from(i);
-                            let attrs = ParsedAttributes::new(&field.attrs).unwrap();
+                        .iter()
+                        .map(|from_ty| {
+                            let resolve_fields =
+                                fields.unnamed.iter().enumerate().map(|(i, field)| {
+                                    let index = Index::from(i);
+                                    let attrs = ParsedAttributes::new(&field.attrs).unwrap();
+                                    let ty = attrs.from.as_ref().unwrap_or(&field.ty);
 
-                            let expr = match attrs.getter {
-                                Some(Getter { path, owned_self }) => {
-                                    if owned_self {
-                                        parse_quote! { &#path (<#from_ty as Clone>::clone(field)) }
-                                    } else {
-                                        parse_quote! { &#path (field) }
+                                    let expr = attrs.getter.as_ref().map_or_else(
+                                        || parse_quote! { (field.#index) },
+                                        |getter| getter.make_expr(from_ty),
+                                    );
+                                    let field = with_cast(field, parse_quote!(__field)).unwrap();
+
+                                    quote! {
+                                        let (fp, fo) = out_field!(out.#index);
+                                        let __field: &#ty = &#expr;
+                                        ::rkyv::Archive::resolve(
+                                            #field,
+                                            pos + fp,
+                                            resolver.#index,
+                                            fo
+                                        );
                                     }
-                                },
-                                None => parse_quote! { (&field.#index) },
-                            };
-
-                            let field = with_cast(field, expr).unwrap();
+                                });
 
                             quote! {
-                                let (fp, fo) = out_field!(out.#index);
-                                ::rkyv::Archive::resolve(#field, pos + fp, resolver.#index, fo);
-                            }
-                        });
+                                impl #impl_generics ArchiveWith<#from_ty>
+                                for #name #ty_generics #archive_where {
+                                    type Archived = <Self as Archive>::Archived;
+                                    type Resolver = <Self as Archive>::Resolver;
 
-                        quote! {
-                            impl #impl_generics ArchiveWith<#from_ty>
-                            for #name #ty_generics #archive_where {
-                                type Archived = <Self as Archive>::Archived;
-                                type Resolver = <Self as Archive>::Resolver;
-
-                                #[allow(clippy::unit_arg)]
-                                #[inline]
-                                unsafe fn resolve_with(
-                                    field: &#from_ty,
-                                    pos: usize,
-                                    resolver: Self::Resolver,
-                                    out: *mut Self::Archived,
-                                ) {
-                                    #( #resolve_fields )*
+                                    #[allow(clippy::unit_arg)]
+                                    #[inline]
+                                    unsafe fn resolve_with(
+                                        field: &#from_ty,
+                                        pos: usize,
+                                        resolver: Self::Resolver,
+                                        out: *mut Self::Archived,
+                                    ) {
+                                        #( #resolve_fields )*
+                                    }
                                 }
                             }
-                        }
-                    })
-                    .collect();
+                        })
+                        .collect();
 
                     let serialize_impls = from_tys
                         .iter()
                         .map(|from_ty| {
+                            let field_vars = fields.unnamed.iter().enumerate().map(|(i, field)| {
+                                let index = Index::from(i);
+                                let ident = format_ident!("__{i}", span = index.span());
+                                let attrs = ParsedAttributes::new(&field.attrs).unwrap();
+                                let ty = attrs.from.as_ref().unwrap_or(&field.ty);
+
+                                let expr = attrs.getter.as_ref().map_or_else(
+                                    || parse_quote! { (field.#index) },
+                                    |getter| getter.make_expr(from_ty),
+                                );
+
+                                quote! { let #ident: &#ty = &#expr; }
+                            });
+
                             let resolver_values =
                                 fields.unnamed.iter().enumerate().map(|(i, field)| {
                                     let index = Index::from(i);
-                                    let attrs = ParsedAttributes::new(&field.attrs).unwrap();
-
-                                    let expr = match attrs.getter {
-                                        Some(Getter { path, owned_self }) => {
-                                            if owned_self {
-                                                parse_quote! { &#path (<#from_ty as Clone>::clone(field)) }
-                                            } else {
-                                                parse_quote! { &#path (field) }
-                                            }
-                                        }
-                                        None => parse_quote! { (&field.#index) },
-                                    };
-
+                                    let ident = format_ident!("__{i}", span = index.span());
+                                    let expr = parse_quote!( #ident );
                                     let field = with_cast(field, expr).unwrap();
 
                                     quote! { Serialize::<__S>::serialize(#field, serializer)? }
@@ -244,6 +247,7 @@ pub fn derive(mut input: DeriveInput) -> Result<TokenStream> {
                                         field: &#from_ty,
                                         serializer: &mut __S,
                                     ) -> Result<Self::Resolver, <__S as Fallible>::Error> {
+                                        #( #field_vars )*
                                         Ok(#resolver_name(
                                             #( #resolver_values, )*
                                         ))

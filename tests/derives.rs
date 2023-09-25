@@ -282,17 +282,14 @@ fn named_struct_private() {
                 self.inner
             }
 
-            pub fn as_inner(&self) -> [u8; 4] {
+            pub fn to_inner(&self) -> [u8; 4] {
                 self.inner
             }
-        }
-    }
 
-    #[derive(Archive, ArchiveWith)]
-    #[archive_with(from(remote::Remote))]
-    struct ExampleByRef {
-        #[archive_with(getter = "remote::Remote::as_inner")]
-        inner: [u8; 4],
+            pub fn as_inner(&self) -> &[u8; 4] {
+                &self.inner
+            }
+        }
     }
 
     #[derive(Archive, ArchiveWith)]
@@ -302,9 +299,24 @@ fn named_struct_private() {
         inner: [u8; 4],
     }
 
+    #[derive(Archive, ArchiveWith)]
+    #[archive_with(from(remote::Remote))]
+    struct ExampleByRef {
+        #[archive_with(getter = "remote::Remote::to_inner")]
+        inner: [u8; 4],
+    }
+
+    #[derive(Archive, ArchiveWith)]
+    #[archive_with(from(remote::Remote))]
+    struct ExampleThroughRef {
+        #[archive_with(getter = "remote::Remote::as_inner", getter_ref)]
+        inner: [u8; 4],
+    }
+
     let remote = remote::Remote::default();
-    let _ = archive::<ExampleByRef, _>(&serialize::<ExampleByRef, _>(&remote));
     let _ = archive::<ExampleByVal, _>(&serialize::<ExampleByVal, _>(&remote));
+    let _ = archive::<ExampleByRef, _>(&serialize::<ExampleByRef, _>(&remote));
+    let _ = archive::<ExampleThroughRef, _>(&serialize::<ExampleThroughRef, _>(&remote));
 }
 
 #[test]

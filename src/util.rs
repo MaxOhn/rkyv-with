@@ -48,6 +48,18 @@ pub struct Getter {
     pub owned_self: bool,
 }
 
+impl Getter {
+    pub fn make_expr(&self, from_ty: &Type) -> Expr {
+        let Self { path, owned_self } = self;
+
+        if *owned_self {
+            parse_quote! { #path (<#from_ty as Clone>::clone(field)) }
+        } else {
+            parse_quote! { #path (field) }
+        }
+    }
+}
+
 impl ParsedAttributes {
     pub fn new(attrs: &[Attribute]) -> Result<Self> {
         let mut parsed = ParsedAttributes::default();
