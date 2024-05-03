@@ -81,6 +81,10 @@ impl ParsedAttributes {
                         getter_path = Some(meta.value()?.parse::<LitStr>()?.parse()?);
                     } else if meta.path.is_ident("getter_owned") {
                         getter_owned = true;
+                    } else {
+                        let msg = "expected `from`, `via`, `getter`, or `getter_owned`";
+
+                        return Err(meta.error(msg));
                     }
 
                     Ok(())

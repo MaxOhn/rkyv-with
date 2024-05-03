@@ -309,7 +309,7 @@ fn named_struct_private() {
     #[derive(Archive, ArchiveWith)]
     #[archive_with(from(remote::Remote))]
     struct ExampleThroughRef {
-        #[archive_with(getter = "remote::Remote::as_inner", getter_ref)]
+        #[archive_with(getter = "remote::Remote::as_inner")]
         inner: [u8; 4],
     }
 
