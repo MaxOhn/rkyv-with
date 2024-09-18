@@ -2,6 +2,9 @@
 
 Third-party derive macro for [rkyv](https://github.com/rkyv/rkyv)'s `{Archive/Serialize/Deserialize}With` traits.
 
+> [!NOTE]
+> This crate was only intended to support `rkyv` versions `0.7.*`. Since `0.8.0`, `rkyv` itself supports trait derives on remote types 🎉
+
 The main use-case for this derive is to be able to use `rkyv` on remote types that don't implement `Archive`, `Serialize`, and `Deserialize` themselves.
 This provides a somewhat similar workaround for rusts orphan rule as [serde's remote support](https://serde.rs/remote-derive.html).
 
